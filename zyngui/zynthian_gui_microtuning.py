@@ -110,80 +110,84 @@ class zynthian_gui_microtuning(zynthian_gui_base):
 
     def create_keyboard(self):
         """Create a piano-style keyboard with 12 notes (2 rows interlocked)"""
-        # Calculate button size - comfortable for touch
-        # Canvas area is roughly 3/4 of total width
-        canvas_width = int(self.width * 0.75)
-        button_size = min(80, canvas_width // 8)  # Square buttons, not too small
-        
-        # Measure exact pixel width of white key button
-        dummy_white = tkinter.Button(self.keyboard_frame, text="C", width=4, height=10, 
-                                     font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size))
-        white_pixel_width = dummy_white.winfo_reqwidth()
+        white_width = 4
+        white_height = 9
+        black_width = 4
+        black_height = 8
+
+        self.canvas_frame.update_idletasks()
+        key_gap = 2
+
+        # Measure pixel widths/heights
+        dummy_white = tkinter.Button(
+            self.canvas_frame, text="C", width=white_width, height=white_height,
+            font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size)
+        )
+        dummy_white.update_idletasks()
+        white_px_w = dummy_white.winfo_reqwidth()
+        white_px_h = dummy_white.winfo_reqheight()
         dummy_white.destroy()
-        
-        # Use exact width for button_size and padding
-        button_size = white_pixel_width
-        key_padding = button_size // 10  # Padding based on exact white key width
-        
-        # Note names for the 12-note chromatic scale
+
+        dummy_black = tkinter.Button(
+            self.canvas_frame, text="C#", width=black_width, height=black_height,
+            font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size)
+        )
+        dummy_black.update_idletasks()
+        black_px_w = dummy_black.winfo_reqwidth()
+        black_px_h = dummy_black.winfo_reqheight()
+        dummy_black.destroy()
+
         white_notes = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
-        black_notes = ['C#', 'D#', '', 'F#', 'G#', 'A#']  # Empty string for gap between E and F
-        
-        # Create container frame centered in canvas_frame
-        self.keyboard_frame = tkinter.Frame(self.canvas_frame,
-                                            bg=zynthian_gui_config.color_panel_bg)
+        black_map = [(0, 'C#'), (1, 'D#'), (3, 'F#'), (4, 'G#'), (5, 'A#')]
+
+        # Container centered in canvas_frame
+        total_w = 7 * white_px_w + 6 * key_gap
+        total_h = white_px_h + black_px_h
+        self.keyboard_frame = tkinter.Frame(self.canvas_frame, bg=zynthian_gui_config.color_panel_bg,
+                                            width=total_w, height=total_h)
         self.keyboard_frame.place(relx=0.5, rely=0.5, anchor=tkinter.CENTER)
-        
-        # Row 1 (top): 5 black keys - positioned to interlock with white keys
-        black_row = tkinter.Frame(self.keyboard_frame, bg=zynthian_gui_config.color_panel_bg)
-        black_row.pack()
-        
-        for i, note in enumerate(black_notes):
-            if note:  # Skip the gap
-                # Position black keys between white keys
-                offset = button_size // 2
-                if i == 0:  # C#
-                    padx_left = int(button_size * 0.5)
-                elif i == 1:  # D#
-                    padx_left = int(button_size * 0.5)
-                elif i == 3:  # F# (after gap)
-                    padx_left = int(button_size * 1.5)  # Extra space for gap
-                else:  # G#, A#
-                    padx_left = int(button_size * 0.5)
-                
-                btn = tkinter.Button(black_row,
-                                    text=note,
-                                    width=3,
-                                    height=6,
-                                    font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size),
-                                    bg=zynthian_gui_config.color_panel_bd,
-                                    fg=zynthian_gui_config.color_tx,
-                                    activebackground=zynthian_gui_config.color_panel_bd,
-                                    bd=0,
-                                    highlightthickness=0,
-                                    relief=tkinter.FLAT,
-                                    command=lambda n=note: self.note_pressed(n))
-                btn.pack(side=tkinter.LEFT, padx=(padx_left, 0), pady=key_padding)
-                self.note_buttons.append(btn)
-        
-        # Row 2 (bottom): 7 white keys
-        white_row = tkinter.Frame(self.keyboard_frame, bg=zynthian_gui_config.color_panel_bg)
-        white_row.pack()
-        
-        for note in white_notes:
-            btn = tkinter.Button(white_row,
-                                text=note,
-                                width=4,
-                                height=10,
-                                font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size),
-                                bg="white",
-                                fg="black",
-                                activebackground="white",
-                                bd=0,
-                                highlightthickness=0,
-                                relief=tkinter.FLAT,
-                                command=lambda n=note: self.note_pressed(n))
-            btn.pack(side=tkinter.LEFT, padx=key_padding, pady=key_padding)
+        self.keyboard_frame.pack_propagate(False)
+
+        # Precompute x positions of white keys
+        white_x = [i * (white_px_w + key_gap) for i in range(7)]
+
+        # White keys
+        white_y = black_px_h
+        for i, note in enumerate(white_notes):
+            btn = tkinter.Button(
+                self.keyboard_frame,
+                text=note,
+                font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size),
+                bg="white",
+                fg="black",
+                activebackground="white",
+                bd=1,
+                highlightthickness=0,
+                relief=tkinter.RAISED,
+                command=lambda n=note: self.note_pressed(n)
+            )
+            btn.place(x=white_x[i], y=white_y, width=white_px_w, height=white_px_h)
+            self.note_buttons.append(btn)
+
+        # Black keys
+        black_y = 0
+        for left_i, note in black_map:
+            boundary_center = white_x[left_i] + white_px_w + (key_gap / 2.0)
+            bx = int(round(boundary_center - (black_px_w / 2.0)))
+
+            btn = tkinter.Button(
+                self.keyboard_frame,
+                text=note,
+                font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size),
+                bg=zynthian_gui_config.color_panel_bd,
+                fg=zynthian_gui_config.color_tx,
+                activebackground=zynthian_gui_config.color_panel_bd,
+                bd=0,
+                highlightthickness=0,
+                relief=tkinter.FLAT,
+                command=lambda n=note: self.note_pressed(n)
+            )
+            btn.place(x=bx, y=black_y, width=black_px_w, height=black_px_h)
             self.note_buttons.append(btn)
 
     def note_pressed(self, note):
