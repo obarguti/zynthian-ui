@@ -50,7 +50,12 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         # Track which scale is selected (0-3)
         self.selected_scale = 0
         self.scale_buttons = []
-        self.note_buttons = []  # Store note buttons for the keyboard
+        self.note_canvases = []  # Store note canvases for the keyboard
+        self.note_map = {}  # canvas to note
+        self.slider_press_event = None
+        self.notes = ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C#', 'D#', 'F#', 'G#', 'A#']
+        self.tunings = {i: {note: 0.0 for note in self.notes} for i in range(4)}  # 4 scales, note: float cents
+        self.cents_labels = []  # Labels for cents values
 
         # Main content area
         self.main_frame.configure(bg=zynthian_gui_config.color_panel_bg)
@@ -110,10 +115,10 @@ class zynthian_gui_microtuning(zynthian_gui_base):
 
     def create_keyboard(self):
         """Create a piano-style keyboard with 12 notes (2 rows interlocked)"""
-        white_width = 4
-        white_height = 9
-        black_width = 4
-        black_height = 8
+        white_width = 3
+        white_height = 8
+        black_width = 3
+        black_height = 7
 
         self.canvas_frame.update_idletasks()
         key_gap = 2
@@ -141,8 +146,11 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         black_map = [(0, 'C#'), (1, 'D#'), (3, 'F#'), (4, 'G#'), (5, 'A#')]
 
         # Container centered in canvas_frame
+        extra_top = 0  # No extra top space
+        extra_bottom = 25  # Space below for labels
+        label_space = 15  # Space between black and white for black labels
         total_w = 7 * white_px_w + 6 * key_gap
-        total_h = white_px_h + black_px_h
+        total_h = white_px_h + black_px_h + label_space + extra_bottom
         self.keyboard_frame = tkinter.Frame(self.canvas_frame, bg=zynthian_gui_config.color_panel_bg,
                                             width=total_w, height=total_h)
         self.keyboard_frame.place(relx=0.5, rely=0.5, anchor=tkinter.CENTER)
@@ -152,44 +160,66 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         white_x = [i * (white_px_w + key_gap) for i in range(7)]
 
         # White keys
-        white_y = black_px_h
+        white_y = black_px_h + label_space
         for i, note in enumerate(white_notes):
-            btn = tkinter.Button(
+            canvas = tkinter.Canvas(
                 self.keyboard_frame,
-                text=note,
-                font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size),
+                width=white_px_w,
+                height=white_px_h,
                 bg="white",
-                fg="black",
-                activebackground="white",
                 bd=1,
                 highlightthickness=0,
-                relief=tkinter.RAISED,
-                command=lambda n=note: self.note_pressed(n)
+                relief=tkinter.RAISED
             )
-            btn.place(x=white_x[i], y=white_y, width=white_px_w, height=white_px_h)
-            self.note_buttons.append(btn)
+            canvas.place(x=white_x[i], y=white_y, width=white_px_w, height=white_px_h)
+            # Draw marker line (horizontal, initially at center)
+            marker_y = 0.5 * white_px_h
+            canvas.create_line(0, marker_y, white_px_w, marker_y, fill='red', width=2, tags="marker")
+            # Draw note text
+            canvas.create_text(white_px_w // 2, white_px_h // 2 - 5, text=note, fill="black", font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size))
+            canvas.bind("<ButtonPress-1>", lambda e, idx=i: self.on_slider_press(e, idx))
+            canvas.bind("<ButtonRelease-1>", self.on_slider_release)
+            canvas.bind("<B1-Motion>", lambda e, idx=i: self.on_slider_motion(e, idx))
+            self.note_canvases.append(canvas)
+            
+            # Label under white key
+            label = tkinter.Label(self.keyboard_frame, text="0", fg="white", bg=zynthian_gui_config.color_panel_bg, 
+                                  font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size))
+            label.place(x=white_x[i] + white_px_w // 2, y=white_y + white_px_h, anchor="n")
+            self.cents_labels.append(label)
 
         # Black keys
         black_y = 0
-        for left_i, note in black_map:
+        for j, (left_i, note) in enumerate(black_map):
             boundary_center = white_x[left_i] + white_px_w + (key_gap / 2.0)
             bx = int(round(boundary_center - (black_px_w / 2.0)))
 
-            btn = tkinter.Button(
+            canvas = tkinter.Canvas(
                 self.keyboard_frame,
-                text=note,
-                font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size),
+                width=black_px_w,
+                height=black_px_h,
                 bg=zynthian_gui_config.color_panel_bd,
-                fg=zynthian_gui_config.color_tx,
-                activebackground=zynthian_gui_config.color_panel_bd,
-                activeforeground=zynthian_gui_config.color_tx,
                 bd=0,
                 highlightthickness=0,
-                relief=tkinter.FLAT,
-                command=lambda n=note: self.note_pressed(n)
+                relief=tkinter.FLAT
             )
-            btn.place(x=bx, y=black_y, width=black_px_w, height=black_px_h)
-            self.note_buttons.append(btn)
+            canvas.place(x=bx, y=black_y, width=black_px_w, height=black_px_h)
+            # Draw marker line (horizontal, initially at center)
+            marker_y = 0.5 * black_px_h
+            canvas.create_line(0, marker_y, black_px_w, marker_y, fill='red', width=2, tags="marker")
+            # Draw note text
+            canvas.create_text(black_px_w // 2, black_px_h // 2 - 5, text=note, fill=zynthian_gui_config.color_tx, font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size))
+            idx = 7 + j  # White keys 0-6, black 7-11
+            canvas.bind("<ButtonPress-1>", lambda e, idx=idx: self.on_slider_press(e, idx))
+            canvas.bind("<ButtonRelease-1>", self.on_slider_release)
+            canvas.bind("<B1-Motion>", lambda e, idx=idx: self.on_slider_motion(e, idx))
+            self.note_canvases.append(canvas)
+            
+            # Label under black key
+            label = tkinter.Label(self.keyboard_frame, text="0", fg="white", bg=zynthian_gui_config.color_panel_bg, 
+                                  font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size))
+            label.place(x=bx + black_px_w // 2, y=black_y + black_px_h, anchor="n")
+            self.cents_labels.append(label)
 
     def note_pressed(self, note):
         """Handle note button press"""
@@ -225,8 +255,46 @@ class zynthian_gui_microtuning(zynthian_gui_base):
 
     def update_canvas_display(self):
         """Update display to show the selected scale"""
-        # Could update note button states or other visual feedback here
+        self.update_all_markers()
         logging.info(f"Displaying Scale {self.selected_scale + 1}")
+
+    def set_tuning(self, scale, note, value):
+        """Set the tuning value for a note on a scale and update the UI if visible."""
+        if scale in self.tunings and note in self.tunings[scale]:
+            self.tunings[scale][note] = round(float(value), 2)
+            if scale == self.selected_scale:
+                idx = self.notes.index(note)
+                cents = self.tunings[scale][note]
+                val = (50 - cents) / 100
+                self.update_slider_marker(self.note_canvases[idx], val)
+                self.cents_labels[idx].config(text=f"{cents:.2f}")
+                logging.info(f"Set tuning {note} on scale {scale} to {cents:.2f} cents")
+
+    def update_slider_marker(self, canvas, value):
+        width = canvas.winfo_width()
+        height = canvas.winfo_height()
+        marker_y = value * height
+        # Delete old marker and redraw
+        canvas.delete("marker")
+        canvas.create_line(0, marker_y, width, marker_y, fill='red', width=2, tags="marker")
+
+    def on_slider_press(self, event, idx):
+        self.slider_press_event = event
+
+    def on_slider_release(self, event):
+        self.slider_press_event = None
+
+    def on_slider_motion(self, event, idx):
+        if self.slider_press_event:
+            canvas = self.note_canvases[idx]
+            height = canvas.winfo_height()
+            value = max(0, min(1, event.y / height))
+            cents = 50 - (value * 100)  # Top = +50, bottom = -50
+            note = self.notes[idx]
+            self.tunings[self.selected_scale][note] = round(cents, 2)
+            self.update_slider_marker(canvas, value)
+            self.cents_labels[idx].config(text=f"{cents:.2f}")
+            logging.info(f"Tuning {note} on scale {self.selected_scale} to {cents:.2f} cents")
 
     def show(self):
         super().show()
