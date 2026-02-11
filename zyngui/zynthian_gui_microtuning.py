@@ -182,6 +182,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
                 bg=zynthian_gui_config.color_panel_bd,
                 fg=zynthian_gui_config.color_tx,
                 activebackground=zynthian_gui_config.color_panel_bd,
+                activeforeground=zynthian_gui_config.color_tx,
                 bd=0,
                 highlightthickness=0,
                 relief=tkinter.FLAT,
