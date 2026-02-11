@@ -98,6 +98,7 @@ class zynthian_gui_main_menu(zynthian_gui_selector_info):
         self.list_data.append((self.tempo_settings, 0, "Tempo Settings", ["Show tempo & sync options.", "metronome.png"]))
         self.list_data.append((self.audio_levels, 0, "Audio Levels", ["Show audio levels view.", "meters.png"]))
         self.list_data.append((self.audio_mixer_learn, 0, "Mixer Learn", ["Enter mixer's MIDI learn mode", "mixer.png"]))
+        self.list_data.append((self.microtuning, 0, "Microtuning", ["Adjust microtuning settings.", "settings.png"]))
 
         # Add list of System / configuration views
         self.list_data.append((None, 0, "> SYSTEM"))
@@ -195,6 +196,10 @@ class zynthian_gui_main_menu(zynthian_gui_selector_info):
     def all_sounds_off(self, t='S'):
         logging.info("All Sounds Off")
         self.zyngui.callable_ui_action("all_sounds_off")
+
+    def microtuning(self, t='S'):
+        logging.info("Microtuning")
+        self.zyngui.show_screen("microtuning")
 
     def set_select_path(self):
         self.select_path.set("Main")

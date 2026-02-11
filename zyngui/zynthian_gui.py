@@ -92,6 +92,7 @@ from zyngui.zynthian_gui_cv_config import zynthian_gui_cv_config
 from zyngui.zynthian_gui_wifi import zynthian_gui_wifi
 from zyngui.zynthian_gui_bluetooth import zynthian_gui_bluetooth
 from zyngui.zynthian_gui_control_test import zynthian_gui_control_test
+from zyngui.zynthian_gui_microtuning import zynthian_gui_microtuning
 
 # TODO This constant should go somewhere else
 ZMOP_MOD_INDEX = 16   # Dedicated zmop for MOD-UI
@@ -461,6 +462,7 @@ class zynthian_gui:
         self.screens['zs3_options'] = zynthian_gui_zs3_options()
         self.screens['tempo'] = zynthian_gui_tempo()
         self.screens['admin'] = zynthian_gui_admin()
+        self.screens['microtuning'] = zynthian_gui_microtuning()
         self.screens['audio_mixer'] = zynthian_gui_mixer()
 
         # Create the right main menu screen
