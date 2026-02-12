@@ -188,6 +188,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.state = MicrotuningState()
         self.cancel_button = None
         self.save_button = None
+        self.pending_bank_idx = None
         self.load_banks()
         self.create_page_layout()
         self.create_bank_buttons()
@@ -211,7 +212,14 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             logging.warning(f"Failed to load microtuning banks: {e}, using defaults")
 
     def save_banks(self):
-        """Save banks to JSON file"""
+        """Show confirmation before saving banks"""
+        self.zyngui.show_confirm(
+            f"Save changes to Bank {self.state.select_bank_index + 1}?\n\nThis will overwrite the existing values.",
+            self.do_save_banks
+        )
+
+    def do_save_banks(self):
+        """Actually save banks to JSON file after confirmation"""
         try:
             self.state.commit()
             with open(self.microtuning_file, 'w') as f:
@@ -394,10 +402,26 @@ class zynthian_gui_microtuning(zynthian_gui_base):
     def select_bank(self, bank_idx):
         """Select a bank (0-3) and update UI"""
         if bank_idx != self.state.select_bank_index:
-            self.state.select_bank_index = bank_idx
-            self.update_bank_button_states()
-            self.sync_key_widgets()
-            logging.info(f"Selected Bank {bank_idx + 1}")
+            # Check if there are unsaved changes
+            if self.state.dirty:
+                self.pending_bank_idx = bank_idx
+                self.zyngui.show_confirm(
+                    f"You have unsaved changes in Bank {self.state.select_bank_index + 1}.\n\nSwitch to Bank {bank_idx + 1} and lose changes?",
+                    self.do_select_bank
+                )
+            else:
+                self.do_select_bank(bank_idx)
+
+    def do_select_bank(self, bank_idx=None):
+        """Actually select the bank after confirmation or if no dirty changes"""
+        if bank_idx is None:
+            bank_idx = self.pending_bank_idx
+        self.state.select_bank_index = bank_idx
+        self.state.dirty = {}  # Clear dirty when switching banks
+        self.update_bank_button_states()
+        self.sync_key_widgets()
+        self.update_button_states()
+        logging.info(f"Selected Bank {bank_idx + 1}")
 
     def show(self):
         super().show()
