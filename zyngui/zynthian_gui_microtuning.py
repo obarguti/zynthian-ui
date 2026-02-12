@@ -207,6 +207,9 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             data = {'banks': rounded_banks}
             with open(self.microtuning_file, 'w') as f:
                 json.dump(data, f, indent=2)
+            # Clear dirty after successful save
+            self.state.dirty = {}
+            self.update_cancel_button_state()
             logging.info("Saved microtuning banks to file")
         except Exception as e:
             logging.error(f"Failed to save microtuning banks: {e}")
@@ -228,10 +231,28 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             idx = NOTES.index(widget.name)
             widget.set_value(self.state.banks[self.state.select_bank_index][idx])
 
+    def update_cancel_button_state(self):
+        """Enable or disable cancel button based on dirty state"""
+        # Find cancel button in buttonbar_button list
+        cancel_button = None
+        for button in self.buttonbar_button:
+            if button and hasattr(button, 'cuia') and button.cuia == 'cancel':
+                cancel_button = button
+                break
+        
+        if cancel_button:
+            if self.state.dirty:
+                # Enable button
+                cancel_button.config(state=tkinter.NORMAL)
+            else:
+                # Disable and gray out button
+                cancel_button.config(state=tkinter.DISABLED)
+
     def clear_bank(self):
         """Clear the current bank"""
         self.state.clear()
         self.sync_key_widgets()
+        self.update_cancel_button_state()
         logging.info(f"Cleared dirty content for Bank {self.state.select_bank_index + 1}")
 
     def cancel_banks(self):
@@ -240,6 +261,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         for widget in self.key_widgets:
             idx = NOTES.index(widget.name)
             widget.set_value(0.0)
+        self.update_cancel_button_state()
         logging.info("Cancelled all bank changes")
         
     def create_page_layout(self):
@@ -351,6 +373,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
     def on_key_value_change(self, idx, value):
         self.state.banks[self.state.select_bank_index][idx] = value
         self.state.dirty[idx] = value
+        self.update_cancel_button_state()
 
     def update_bank_button_states(self):
         """Update the visual state of bank buttons (e.g., highlight selected)"""
@@ -376,6 +399,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             self.center_frame.update_idletasks()
             self.create_keyboard()
             self.keyboard_created = True
+        self.update_cancel_button_state()
         self.set_select_path()
 
     def hide(self):
