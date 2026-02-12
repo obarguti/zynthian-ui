@@ -221,21 +221,27 @@ class zynthian_gui_microtuning(zynthian_gui_base):
 
     def save_banks(self):
         """Show confirmation before saving banks"""
+        logging.info(f"save_banks called, dirty before commit: {self.state.dirty}")
+        self.state.commit()  # Commit immediately when user clicks save
+        logging.info(f"After commit, banks[{self.state.select_bank_index}]: {self.state.banks[self.state.select_bank_index]}")
         self.zyngui.show_confirm(
-            f"Save changes to Bank {self.state.select_bank_index + 1}?\n\nThis will overwrite the existing values.",
+            f"Save changes to Bank {self.state.select_bank_index + 1}?\\n\\nThis will overwrite the existing values.",
             self.do_save_banks
         )
 
-    def do_save_banks(self):
+    def do_save_banks(self, params=None):
         """Actually save banks to JSON file after confirmation"""
         try:
-            self.state.commit()
+            logging.info(f"Writing banks to {self.microtuning_file}")
+            logging.info(f"Banks data: {self.state.banks}")
             with open(self.microtuning_file, 'w') as f:
                 json.dump({'banks': [[round(val, 2) for val in bank] for bank in self.state.banks]}, f, indent=2)
             self.update_button_states()
-            logging.info("Saved microtuning banks to file")
+            logging.info("Saved microtuning banks to file successfully")
         except Exception as e:
             logging.error(f"Failed to save microtuning banks: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
 
     def cb_button_release(self, event):
         cuia = event.widget.cuia
