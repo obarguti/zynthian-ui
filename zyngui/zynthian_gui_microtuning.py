@@ -40,6 +40,7 @@ BLACK_KEYS_COLOR = "#2F2F2F"
 WHITE_KEYS_COLOR = "#C0C0C0"
 TUNING_RANGE = [-50, 50]
 LABEL_SIZE = zynthian_gui_config.font_size
+TUNING_UPDATE_DELAY = 500  # Milliseconds to wait before applying tuning to engine
 
 # ------------------------------------------------------------------------------
 # Microtuning Key Widget Class
@@ -197,6 +198,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.cancel_button = None
         self.save_button = None
         self.pending_bank_idx = None
+        self.update_timer = None  # Timer for debouncing engine updates
         self.load_banks()
         self.create_page_layout()
         self.create_bank_buttons()
@@ -405,6 +407,19 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         # Only update dirty, not the saved banks
         self.state.dirty[idx] = value
         self.update_button_states()
+        
+        # Debounce the engine update - cancel previous timer and start new one
+        if self.update_timer:
+            self.after_cancel(self.update_timer)
+        self.update_timer = self.after(TUNING_UPDATE_DELAY, self.apply_tuning_to_engine)
+
+    def apply_tuning_to_engine(self):
+        """Called after 500ms of no changes to apply tuning to engine"""
+        self.update_timer = None
+        # TODO: Apply the tuning values to the engine here
+        # Get current values (saved + dirty overlay):
+        pending_values = self.state.get_pending_values()
+        logging.info(f"Applying tuning to engine - Bank {self.state.select_bank_index + 1}: {pending_values}")
 
     def update_bank_button_states(self):
         """Update the visual state of bank buttons (e.g., highlight selected)"""
