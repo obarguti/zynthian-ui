@@ -31,6 +31,8 @@ import json
 # Zynthian specific modules
 from zyngui import zynthian_gui_config
 from zyngui.zynthian_gui_base import zynthian_gui_base
+import zynautoconnect
+from zyncoder.zyncore import lib_zyncore
 
 # ------------------------------------------------------------------------------
 # Constants
@@ -416,10 +418,47 @@ class zynthian_gui_microtuning(zynthian_gui_base):
     def apply_tuning_to_engine(self):
         """Called after 500ms of no changes to apply tuning to engine"""
         self.update_timer = None
-        # TODO: Apply the tuning values to the engine here
-        # Get current values (saved + dirty overlay):
+        
+        # Get current values (saved + dirty overlay): 12 floats in C..B order
         pending_values = self.state.get_pending_values()
+        print(f"🎵 TUNING: Bank {self.state.select_bank_index + 1}: {pending_values}")
         logging.info(f"Applying tuning to engine - Bank {self.state.select_bank_index + 1}: {pending_values}")
+        
+        # MTS Scale/Octave Tuning (1-byte): 12 values, repeats every octave
+        # Encode cents offset -> data byte: clamp to [-64..+63], then add 64
+        tuning_bytes = [max(-64, min(63, int(round(v)))) + 64 for v in pending_values]
+        
+        # Channel mask for all 16 channels: bits 1-16
+        # hh covers channels 1-7 (bits 0-6), gg covers 8-14 (bits 0-6), ff covers 15-16 (bits 0-1)
+        ff, gg, hh = 0x03, 0x7F, 0x7F
+        
+        # Build full MTS SysEx message: F0 7F <dev=7F> 08 08 <3 channel bytes> <12 tuning bytes> F7
+        sysex_data = bytes([0xF0, 0x7F, 0x7F, 0x08, 0x08, ff, gg, hh] + tuning_bytes + [0xF7])
+        
+        # Log the exact SysEx being sent
+        print(f"🎵 MTS SysEx hex: {' '.join(f'{b:02X}' for b in sysex_data)}")
+        print(f"🎵 Tuning bytes: {tuning_bytes}")
+        logging.info(f"MTS SysEx hex: {' '.join(f'{b:02X}' for b in sysex_data)}")
+        logging.info(f"Tuning bytes (should be around 64 for 0 cents): {tuning_bytes}")
+        
+        # Broadcast MTS tuning to all MIDI output ports
+        sent_count = 0
+        try:
+            for i, port_name in enumerate(zynautoconnect.devices_out_name):
+                lib_zyncore.dev_send_midi_event(i, sysex_data, len(sysex_data))
+                logging.debug(f"Sent MTS tuning SysEx to {port_name} (device {i})")
+                sent_count += 1
+            
+            if sent_count == 0:
+                print(f"⚠️  No MIDI output ports found - tuning not applied")
+                logging.warning("No MIDI output ports found - tuning not applied")
+            else:
+                print(f"✅ Broadcast tuning to {sent_count} MIDI port(s)")
+                logging.info(f"Broadcast tuning to {sent_count} MIDI port(s)")
+                
+        except Exception as e:
+            print(f"❌ Failed to send MTS tuning SysEx: {e}")
+            logging.error(f"Failed to send MTS tuning SysEx: {e}")
 
     def update_bank_button_states(self):
         """Update the visual state of bank buttons (e.g., highlight selected)"""
@@ -454,6 +493,8 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.sync_key_widgets()
         self.update_button_states()
         logging.info(f"Selected Bank {bank_idx + 1}")
+        # Apply newly selected bank's tuning immediately
+        self.apply_tuning_to_engine()
 
     def show(self):
         super().show()
@@ -463,6 +504,8 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             self.keyboard_created = True
         self.update_button_states()
         self.set_select_path()
+        # Apply current bank's tuning when screen is shown
+        self.apply_tuning_to_engine()
 
     def hide(self):
         super().hide()
