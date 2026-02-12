@@ -117,6 +117,14 @@ class MicrotuningKeyWidget(tkinter.Frame):
             height = self.canvas.winfo_height()
             val = self._clamp(event.y / height, 0, 1)
             self.value = TUNING_RANGE[1] - (val * 100)
+            
+            # Magnetic snap points at 0.00 and -50.00
+            snap_threshold = 3.0  # cents within which to snap
+            if abs(self.value - 0.0) < snap_threshold:
+                self.value = 0.0
+            elif abs(self.value - (-50.0)) < snap_threshold:
+                self.value = -50.0
+            
             self.update_marker()
             self.label.config(text=f"{self.value:.2f}")
             if self.callback:
@@ -353,7 +361,10 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         center_w = self.center_frame.winfo_width()
         available_w = center_w - 2 * padding
         white_spacing = (available_w / 7) * 0.85  # Reduced spacing
-        start_x = padding
+        # Center the keyboard by calculating offset
+        total_keyboard_width = 6 * white_spacing + px_w
+        centering_offset = (available_w - total_keyboard_width) / 2
+        start_x = padding + centering_offset
         
         pending_values = self.state.get_pending_values()
 
