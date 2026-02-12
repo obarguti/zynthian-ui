@@ -145,12 +145,25 @@ class MicrotuningState:
         self.dirty = {}
 
     def clear(self):
-        """Clear current bank - set non-zero values to 0.0 and mark as dirty"""
+        """Clear current bank - mark all non-zero values to be cleared to 0.0"""
         current_bank = self.banks[self.select_bank_index]
+        # Mark all non-zero values as dirty (to be cleared)
         for i in range(12):
             if current_bank[i] != 0.0:
-                current_bank[i] = 0.0
                 self.dirty[i] = 0.0
+
+    def commit(self):
+        """Apply dirty values to the banks array and clear dirty"""
+        for idx, value in self.dirty.items():
+            self.banks[self.select_bank_index][idx] = value
+        self.dirty = {}
+
+    def get_pending_values(self):
+        """Return the selected bank with dirty values overlayed on top"""
+        result = self.banks[self.select_bank_index].copy()
+        for idx, value in self.dirty.items():
+            result[idx] = value
+        return result
 
 
 # ------------------------------------------------------------------------------
@@ -173,6 +186,8 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.key_widgets = []
         self.keyboard_created = False
         self.state = MicrotuningState()
+        self.cancel_button = None
+        self.save_button = None
         self.load_banks()
         self.create_page_layout()
         self.create_bank_buttons()
@@ -185,31 +200,23 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         os.makedirs(self.microtuning_dir, exist_ok=True)
         self.microtuning_file = os.path.join(self.microtuning_dir, "banks.json")
         
-        if os.path.exists(self.microtuning_file):
-            try:
-                with open(self.microtuning_file, 'r') as f:
-                    data = json.load(f)
-                    if 'banks' in data:
-                        self.state.banks = data['banks']
-                        logging.info("Loaded microtuning banks from file")
-                    else:
-                        logging.warning("Microtuning file exists but has no 'banks' data, using defaults")
-            except Exception as e:
-                logging.warning(f"Failed to load microtuning banks: {e}, using defaults")
-        else:
-            logging.info("Microtuning banks file not found, using default banks (all zeros)")
+        try:
+            with open(self.microtuning_file, 'r') as f:
+                data = json.load(f)
+                self.state.banks = data.get('banks', [[0.0] * 12 for _ in range(4)])
+                logging.info("Loaded microtuning banks from file")
+        except FileNotFoundError:
+            logging.info("Microtuning banks file not found, using default banks")
+        except Exception as e:
+            logging.warning(f"Failed to load microtuning banks: {e}, using defaults")
 
     def save_banks(self):
         """Save banks to JSON file"""
         try:
-            # Round all values to 2 decimal places
-            rounded_banks = [[round(val, 2) for val in bank] for bank in self.state.banks]
-            data = {'banks': rounded_banks}
+            self.state.commit()
             with open(self.microtuning_file, 'w') as f:
-                json.dump(data, f, indent=2)
-            # Clear dirty after successful save
-            self.state.dirty = {}
-            self.update_cancel_button_state()
+                json.dump({'banks': [[round(val, 2) for val in bank] for bank in self.state.banks]}, f, indent=2)
+            self.update_button_states()
             logging.info("Saved microtuning banks to file")
         except Exception as e:
             logging.error(f"Failed to save microtuning banks: {e}")
@@ -226,42 +233,37 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             super().cb_button_release(event)
 
     def sync_key_widgets(self):
-        """Sync all key widgets with current bank values from state"""
+        """Sync all key widgets with current bank values from state (applying dirty overrides)"""
+        pending_values = self.state.get_pending_values()
         for widget in self.key_widgets:
-            idx = NOTES.index(widget.name)
-            widget.set_value(self.state.banks[self.state.select_bank_index][idx])
+            widget.set_value(pending_values[widget.note_idx])
 
-    def update_cancel_button_state(self):
-        """Enable or disable cancel button based on dirty state"""
-        # Find cancel button in buttonbar_button list
-        cancel_button = None
-        for button in self.buttonbar_button:
-            if button and hasattr(button, 'cuia') and button.cuia == 'cancel':
-                cancel_button = button
-                break
+    def update_button_states(self):
+        """Enable or disable cancel and save buttons based on dirty state"""
+        if not self.cancel_button:
+            self.cancel_button = next((btn for btn in self.buttonbar_button 
+                                       if btn and hasattr(btn, 'cuia') and btn.cuia == 'cancel'), None)
+        if not self.save_button:
+            self.save_button = next((btn for btn in self.buttonbar_button 
+                                     if btn and hasattr(btn, 'cuia') and btn.cuia == 'save'), None)
         
-        if cancel_button:
-            if self.state.dirty:
-                # Enable button
-                cancel_button.config(state=tkinter.NORMAL)
-            else:
-                # Disable and gray out button
-                cancel_button.config(state=tkinter.DISABLED)
+        state = tkinter.NORMAL if self.state.dirty else tkinter.DISABLED
+        self.cancel_button.config(state=state)
+        self.save_button.config(state=state)
 
     def clear_bank(self):
         """Clear the current bank"""
         self.state.clear()
         self.sync_key_widgets()
-        self.update_cancel_button_state()
+        self.update_button_states()
         logging.info(f"Cleared dirty content for Bank {self.state.select_bank_index + 1}")
 
     def cancel_banks(self):
-        """Cancel all changes - discard unsaved changes"""
+        """Cancel all changes - discard unsaved changes and restore saved values"""
         self.state.cancel()
-        for widget in self.key_widgets:
-            idx = NOTES.index(widget.name)
-            widget.set_value(0.0)
-        self.update_cancel_button_state()
+        # Restore widgets to saved bank values (not zero!)
+        self.sync_key_widgets()
+        self.update_button_states()
         logging.info("Cancelled all bank changes")
         
     def create_page_layout(self):
@@ -306,7 +308,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             top_border.pack(fill='x', side='top')
             
             btn = tkinter.Button(btn_frame,
-                                text=f"{i + 1}",
+                                text=f"Bank {i + 1}",
                                 font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size),
                                 bg=zynthian_gui_config.color_panel_bg,
                                 fg=zynthian_gui_config.color_tx,
@@ -344,6 +346,8 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         available_w = center_w - 2 * padding
         white_spacing = available_w / 7
         start_x = padding
+        
+        pending_values = self.state.get_pending_values()
 
         # Lower row: whites (7 keys)
         white_y = self.center_frame.winfo_height() - px_h - 30
@@ -352,8 +356,9 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             idx = NOTES.index(note)
             x = start_x + i * white_spacing
             widget = MicrotuningKeyWidget(self.center_frame, note, px_w, px_h, 
-                                          value=self.state.banks[self.state.select_bank_index][idx], 
+                                          value=pending_values[idx], 
                                           callback=lambda val, idx=idx: self.on_key_value_change(idx, val))
+            widget.note_idx = idx
             widget.place(x=x, y=white_y)
             self.key_widgets.append(widget)
 
@@ -365,15 +370,16 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             idx = NOTES.index(note)
             x = start_x + pos * white_spacing - px_w / 2
             widget = MicrotuningKeyWidget(self.center_frame, note, px_w, px_h, 
-                                          value=self.state.banks[self.state.select_bank_index][idx], 
+                                          value=pending_values[idx], 
                                           callback=lambda val, idx=idx: self.on_key_value_change(idx, val))
+            widget.note_idx = idx
             widget.place(x=x, y=black_y)
             self.key_widgets.append(widget)
 
     def on_key_value_change(self, idx, value):
-        self.state.banks[self.state.select_bank_index][idx] = value
+        # Only update dirty, not the saved banks
         self.state.dirty[idx] = value
-        self.update_cancel_button_state()
+        self.update_button_states()
 
     def update_bank_button_states(self):
         """Update the visual state of bank buttons (e.g., highlight selected)"""
@@ -399,7 +405,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             self.center_frame.update_idletasks()
             self.create_keyboard()
             self.keyboard_created = True
-        self.update_cancel_button_state()
+        self.update_button_states()
         self.set_select_path()
 
     def hide(self):
