@@ -352,13 +352,13 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         padding = 10
         center_w = self.center_frame.winfo_width()
         available_w = center_w - 2 * padding
-        white_spacing = available_w / 7
+        white_spacing = (available_w / 7) * 0.85  # Reduced spacing
         start_x = padding
         
         pending_values = self.state.get_pending_values()
 
         # Lower row: whites (7 keys)
-        white_y = self.center_frame.winfo_height() - px_h - 30
+        white_y = self.center_frame.winfo_height() - px_h - 50
         white_notes = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
         for i, note in enumerate(white_notes):
             idx = NOTES.index(note)
@@ -376,7 +376,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         black_positions = [0.5, 1.5, 3.5, 4.5, 5.5]  # Between whites
         for j, (note, pos) in enumerate(zip(black_notes, black_positions)):
             idx = NOTES.index(note)
-            x = start_x + pos * white_spacing - px_w / 2
+            x = start_x + pos * white_spacing
             widget = MicrotuningKeyWidget(self.center_frame, note, px_w, px_h, 
                                           value=pending_values[idx], 
                                           callback=lambda val, idx=idx: self.on_key_value_change(idx, val))
