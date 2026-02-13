@@ -217,17 +217,22 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             with open(self.microtuning_file, 'r') as f:
                 data = json.load(f)
                 self.state.banks = data.get('banks', [[0.0] * 12 for _ in range(4)])
-                logging.info("Loaded microtuning banks from file")
+                logging.error("Loaded microtuning banks from file")
         except FileNotFoundError:
-            logging.info("Microtuning banks file not found, using default banks")
+            logging.error("Microtuning banks file not found, using default banks")
         except Exception as e:
             logging.warning(f"Failed to load microtuning banks: {e}, using defaults")
 
     def save_banks(self):
         """Show confirmation before saving banks"""
-        logging.info(f"save_banks called, dirty before commit: {self.state.dirty}")
+        logging.error("[MICROTUNING] save_banks called")
+        logging.error(f"save_banks called, dirty before commit: {self.state.dirty}")
         self.state.commit()  # Commit immediately when user clicks save
-        logging.info(f"After commit, banks[{self.state.select_bank_index}]: {self.state.banks[self.state.select_bank_index]}")
+        logging.error(f"After commit, banks[{self.state.select_bank_index}]: {self.state.banks[self.state.select_bank_index]}")
+        
+        # DEBUG: Skip confirmation for now to test if it's the issue? No, better trace it.
+        # Actually, let's just trace.
+        logging.error(f"[MICROTUNING] calling show_confirm")
         self.zyngui.show_confirm(
             f"Save changes to Bank {self.state.select_bank_index + 1}?\\n\\nThis will overwrite the existing values.",
             self.do_save_banks
@@ -235,20 +240,26 @@ class zynthian_gui_microtuning(zynthian_gui_base):
 
     def do_save_banks(self, params=None):
         """Actually save banks to JSON file after confirmation"""
+        logging.error("[MICROTUNING] do_save_banks called")
         try:
-            logging.info(f"Writing banks to {self.microtuning_file}")
-            logging.info(f"Banks data: {self.state.banks}")
+            logging.error(f"[MICROTUNING] writing to {self.microtuning_file}")
+            logging.error(f"Writing banks to {self.microtuning_file}")
+            logging.error(f"Banks data: {self.state.banks}")
             with open(self.microtuning_file, 'w') as f:
                 json.dump({'banks': [[round(val, 2) for val in bank] for bank in self.state.banks]}, f, indent=2)
             self.update_button_states()
-            logging.info("Saved microtuning banks to file successfully")
+            # Apply the saved tuning to engine
+            self.apply_tuning_to_engine()
+            logging.error("Saved microtuning banks to file successfully")
         except Exception as e:
+            logging.error(f"[MICROTUNING] ERROR saving banks: {e}")
             logging.error(f"Failed to save microtuning banks: {e}")
             import traceback
             logging.error(traceback.format_exc())
 
     def cb_button_release(self, event):
         cuia = event.widget.cuia
+        logging.error(f"[MICROTUNING] Button release: {cuia}")
         if cuia == "clear":
             self.clear_bank()
         elif cuia == "save":
@@ -282,7 +293,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.state.clear()
         self.sync_key_widgets()
         self.update_button_states()
-        logging.info(f"Cleared dirty content for Bank {self.state.select_bank_index + 1}")
+        logging.error(f"Cleared dirty content for Bank {self.state.select_bank_index + 1}")
 
     def cancel_banks(self):
         """Cancel all changes - discard unsaved changes and restore saved values"""
@@ -290,7 +301,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         # Restore widgets to saved bank values (not zero!)
         self.sync_key_widgets()
         self.update_button_states()
-        logging.info("Cancelled all bank changes")
+        logging.error("Cancelled all bank changes")
         
     def create_page_layout(self):
         # Main content area
@@ -409,56 +420,77 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         # Only update dirty, not the saved banks
         self.state.dirty[idx] = value
         self.update_button_states()
-        
-        # Debounce the engine update - cancel previous timer and start new one
-        if self.update_timer:
-            self.after_cancel(self.update_timer)
-        self.update_timer = self.after(TUNING_UPDATE_DELAY, self.apply_tuning_to_engine)
+        # Note: Tuning is only applied to engine on Save or Bank Switch
 
     def apply_tuning_to_engine(self):
-        """Called after 500ms of no changes to apply tuning to engine"""
-        self.update_timer = None
+        """
+        Translates the current bank values into FluidSynth tuning commands
+        and sends them directly to FluidSynth engines.
+        """
+        logging.error("[MICROTUNING] apply_tuning_to_engine called")
+        # Get the 12 offsets (e.g., [0, 0, 0, 0, -50, 0...])
+        offsets = self.state.get_pending_values()
+        logging.error(f"[MICROTUNING] Offsets: {offsets}")
         
-        # Get current values (saved + dirty overlay): 12 floats in C..B order
-        pending_values = self.state.get_pending_values()
-        print(f"🎵 TUNING: Bank {self.state.select_bank_index + 1}: {pending_values}")
-        logging.info(f"Applying tuning to engine - Bank {self.state.select_bank_index + 1}: {pending_values}")
-        
-        # MTS Scale/Octave Tuning (1-byte): 12 values, repeats every octave
-        # Encode cents offset -> data byte: clamp to [-64..+63], then add 64
-        tuning_bytes = [max(-64, min(63, int(round(v)))) + 64 for v in pending_values]
-        
-        # Channel mask for all 16 channels: bits 1-16
-        # hh covers channels 1-7 (bits 0-6), gg covers 8-14 (bits 0-6), ff covers 15-16 (bits 0-1)
-        ff, gg, hh = 0x03, 0x7F, 0x7F
-        
-        # Build full MTS SysEx message: F0 7F <dev=7F> 08 08 <3 channel bytes> <12 tuning bytes> F7
-        sysex_data = bytes([0xF0, 0x7F, 0x7F, 0x08, 0x08, ff, gg, hh] + tuning_bytes + [0xF7])
-        
-        # Log the exact SysEx being sent
-        print(f"🎵 MTS SysEx hex: {' '.join(f'{b:02X}' for b in sysex_data)}")
-        print(f"🎵 Tuning bytes: {tuning_bytes}")
-        logging.info(f"MTS SysEx hex: {' '.join(f'{b:02X}' for b in sysex_data)}")
-        logging.info(f"Tuning bytes (should be around 64 for 0 cents): {tuning_bytes}")
-        
-        # Broadcast MTS tuning to all MIDI output ports
-        sent_count = 0
+        # Apply tuning to all FluidSynth engines via their command interface
         try:
-            for i, port_name in enumerate(zynautoconnect.devices_out_name):
-                lib_zyncore.dev_send_midi_event(i, sysex_data, len(sysex_data))
-                logging.debug(f"Sent MTS tuning SysEx to {port_name} (device {i})")
-                sent_count += 1
+            from zyngine.zynthian_engine_fluidsynth import zynthian_engine_fluidsynth
             
-            if sent_count == 0:
-                print(f"⚠️  No MIDI output ports found - tuning not applied")
-                logging.warning("No MIDI output ports found - tuning not applied")
-            else:
-                print(f"✅ Broadcast tuning to {sent_count} MIDI port(s)")
-                logging.info(f"Broadcast tuning to {sent_count} MIDI port(s)")
-                
+            chain_manager = self.zyngui.chain_manager
+            applied_count = 0
+            
+            # Iterate through all processors to find FluidSynth instances  
+            for chain_id, chain in chain_manager.chains.items():
+                for processor in chain.get_processors():
+                    if isinstance(processor.engine, zynthian_engine_fluidsynth):
+                        engine = processor.engine
+                        logging.error(f"[MICROTUNING] Found FluidSynth engine: {processor.get_name()}")
+                        
+                        try:
+                            # Create tuning (bank 0, program 0) - correct FluidSynth syntax
+                            logging.error("[MICROTUNING] Creating tuning...")
+                            
+                            out1 = engine.proc_cmd("tuning Microtuning 0 0")
+                            logging.error(f"[MICROTUNING] tuning Microtuning 0 0 output: {out1}")
+                            
+                            # Apply tuning to all 12 notes across all octaves
+                            # FluidSynth uses MIDI note numbers: 0-127
+                            # We apply the offsets to each note within the chromatic scale
+                            for octave in range(11):  # Octaves 0-10 cover 0-127
+                                for note_offset_idx, cents_offset in enumerate(offsets):
+                                    midi_note = octave * 12 + note_offset_idx
+                                    if midi_note <= 127:
+                                        # FluidSynth tune command: tune <bank> <prog> <key> <pitch>
+                                        # Pitch = MIDI note * 100 + cents_offset
+                                        pitch = midi_note * 100.0 + cents_offset
+                                        out = engine.proc_cmd(f"tune 0 0 {midi_note} {pitch}")
+                                        if octave == 5 and note_offset_idx in [4, 11]:  # Log E and B in middle octave
+                                            logging.error(f"[MICROTUNING] Set note {midi_note} to {pitch} cents, output: {out}")
+                            
+                            # Apply tuning to all MIDI channels (0-15) - correct FluidSynth syntax
+                            for chan in range(16):
+                                out = engine.proc_cmd(f"settuning {chan} 0 0")
+                                if chan == 0:  # Log first channel
+                                    logging.error(f"[MICROTUNING] settuning {chan} 0 0 output: {out}")
+                            
+                            applied_count += 1
+                            logging.error(f"[MICROTUNING] Applied tuning to {processor.get_name()}")
+                            
+                            applied_count += 1
+                            logging.error(f"[MICROTUNING] Applied tuning to {processor.get_name()}")
+                            
+                        except Exception as e:
+                            logging.error(f"[MICROTUNING] Error applying to {processor.get_name()}: {e}")
+                            import traceback
+                            logging.error(traceback.format_exc())
+            
+            logging.error(f"[MICROTUNING] Successfully applied to {applied_count} FluidSynth engine(s)")
+            
         except Exception as e:
-            print(f"❌ Failed to send MTS tuning SysEx: {e}")
-            logging.error(f"Failed to send MTS tuning SysEx: {e}")
+            logging.error(f"[MICROTUNING] ERROR applying tuning: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+
 
     def update_bank_button_states(self):
         """Update the visual state of bank buttons (e.g., highlight selected)"""
@@ -492,7 +524,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.update_bank_button_states()
         self.sync_key_widgets()
         self.update_button_states()
-        logging.info(f"Selected Bank {bank_idx + 1}")
+        logging.error(f"Selected Bank {bank_idx + 1}")
         # Apply newly selected bank's tuning immediately
         self.apply_tuning_to_engine()
 
@@ -504,8 +536,6 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             self.keyboard_created = True
         self.update_button_states()
         self.set_select_path()
-        # Apply current bank's tuning when screen is shown
-        self.apply_tuning_to_engine()
 
     def hide(self):
         super().hide()
