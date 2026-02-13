@@ -41,7 +41,7 @@ NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 BLACK_KEYS_COLOR = "#2F2F2F"
 WHITE_KEYS_COLOR = "#C0C0C0"
 TUNING_RANGE = [-50, 50]
-LABEL_SIZE = zynthian_gui_config.font_size
+LABEL_SIZE = getattr(zynthian_gui_config, 'font_size', 12)
 TUNING_UPDATE_DELAY = 500  # Milliseconds to wait before applying tuning to engine
 
 # ------------------------------------------------------------------------------
