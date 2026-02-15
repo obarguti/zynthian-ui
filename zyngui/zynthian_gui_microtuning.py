@@ -202,6 +202,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.save_button = None
         self.pending_bank_idx = None
         self.update_timer = None  # Timer for debouncing engine updates
+        self.fluidsynth_engine = None  # Cached FluidSynth engine instance
         self.load_banks()
         self.create_page_layout()
         self.create_bank_buttons()
@@ -413,55 +414,53 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.update_timer = Timer(TUNING_UPDATE_DELAY / 1000.0, self.apply_tuning_to_engine)
         self.update_timer.start()
 
-    def apply_tuning_to_engine(self):
-        """
-        Translates the current bank values into FluidSynth tuning commands
-        and sends them directly to FluidSynth engines.
-        """
-        offsets = self.state.get_pending_values()
-        
-        # Apply tuning to all FluidSynth engines via their command interface
+    def refresh_fluidsynth_engine(self):
+        """Scan all chains and cache a single FluidSynth engine instance"""
+        self.fluidsynth_engine = None
         try:
             from zyngine.zynthian_engine_fluidsynth import zynthian_engine_fluidsynth
             
             chain_manager = self.zyngui.chain_manager
-            applied_count = 0
-            
-            # Iterate through all processors to find FluidSynth instances  
             for chain_id, chain in chain_manager.chains.items():
                 for processor in chain.get_processors():
                     if isinstance(processor.engine, zynthian_engine_fluidsynth):
-                        engine = processor.engine
-                        
-                        try:
-                            # Create tuning (bank 0, program 0) - correct FluidSynth syntax
-                            engine.proc_cmd("tuning Microtuning 0 0")
-                            
-                            # Apply tuning to all 12 notes across all octaves
-                            # FluidSynth uses MIDI note numbers: 0-127
-                            # We apply the offsets to each note within the chromatic scale
-                            for octave in range(11):  # Octaves 0-10 cover 0-127
-                                for note_offset_idx, cents_offset in enumerate(offsets):
-                                    midi_note = octave * 12 + note_offset_idx
-                                    if midi_note <= 127:
-                                        # FluidSynth tune command: tune <bank> <prog> <key> <pitch>
-                                        # Pitch = MIDI note * 100 + cents_offset
-                                        pitch = midi_note * 100.0 + cents_offset
-                                        engine.proc_cmd(f"tune 0 0 {midi_note} {pitch}")
-                            
-                            # Apply tuning to all MIDI channels (0-15) - correct FluidSynth syntax
-                            for chan in range(16):
-                                engine.proc_cmd(f"settuning {chan} 0 0")
-                            
-                            applied_count += 1
-                            
-                        except Exception as e:
-                            logging.error(f"Error applying tuning to {processor.get_name()}: {e}")
+                        # Found one - that's all we need since there's only one FS process
+                        self.fluidsynth_engine = processor.engine
+                        return
+        except Exception as e:
+            logging.error(f"Error scanning for FluidSynth engine: {e}")
+
+    def apply_tuning_to_engine(self):
+        """
+        Translates the current bank values into FluidSynth tuning commands
+        and sends them directly to the FluidSynth engine.
+        Since there's only one FluidSynth process, we only need to configure it once.
+        """
+        offsets = self.state.get_pending_values()
+        engine = self.fluidsynth_engine
+        
+        try:
+            # Create tuning (bank 0, program 0) - correct FluidSynth syntax
+            engine.proc_cmd("tuning Microtuning 0 0")
+            
+            # Apply tuning to all 12 notes across all octaves
+            # FluidSynth uses MIDI note numbers: 0-127
+            # We apply the offsets to each note within the chromatic scale
+            for octave in range(11):  # Octaves 0-10 cover 0-127
+                for note_offset_idx, cents_offset in enumerate(offsets):
+                    midi_note = octave * 12 + note_offset_idx
+                    if midi_note <= 127:
+                        # FluidSynth tune command: tune <bank> <prog> <key> <pitch>
+                        # Pitch = MIDI note * 100 + cents_offset
+                        pitch = midi_note * 100.0 + cents_offset
+                        engine.proc_cmd(f"tune 0 0 {midi_note} {pitch}")
+            
+            # Apply tuning to all MIDI channels (0-15) - correct FluidSynth syntax
+            for chan in range(16):
+                engine.proc_cmd(f"settuning {chan} 0 0")
             
         except Exception as e:
-            logging.error(f"Error applying tuning: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
+            logging.error(f"Error applying tuning to FluidSynth: {e}")
 
 
     def update_bank_button_states(self):
@@ -507,6 +506,9 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             self.keyboard_created = True
         self.update_button_states()
         self.set_select_path()
+        # Scan for and cache FluidSynth engine, then apply current tuning
+        self.refresh_fluidsynth_engine()
+        self.apply_tuning_to_engine()
 
     def hide(self):
         super().hide()
