@@ -303,6 +303,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.state.clear()
         self.sync_key_widgets()
         self.update_button_states()
+        self.apply_tuning_to_engine()
 
     def cancel_banks(self):
         """Cancel all changes - discard unsaved changes and restore saved values"""
