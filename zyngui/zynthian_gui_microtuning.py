@@ -129,6 +129,8 @@ class MicrotuningKeyWidget(tkinter.Frame):
 
     def on_press(self, event):
         self.press_event = event
+        self.press_start_y = event.y
+        self.press_start_value = self.value
 
     def on_release(self, event):
         self.press_event = None
@@ -139,8 +141,9 @@ class MicrotuningKeyWidget(tkinter.Frame):
 
     def on_motion(self, event):
         if self.press_event:
-            val = self._clamp(event.y / self.key_height, 0, 1)
-            self.value = TUNING_RANGE[1] - (val * 100)
+            delta_y = event.y - self.press_start_y
+            delta_cents = -(delta_y / self.key_height) * 100
+            self.value = self._clamp(self.press_start_value + delta_cents, TUNING_RANGE[0], TUNING_RANGE[1])
             
             # Magnetic snap points at 0.00 and -50.00
             snap_threshold = 3.0  # cents within which to snap
