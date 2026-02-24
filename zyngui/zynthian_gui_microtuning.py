@@ -180,9 +180,9 @@ class MicrotuningState:
         self.dirty = {}
 
     def clear(self):
-        """Clear current bank - mark all non-zero values to be cleared to 0.0"""
+        """Clear current bank - set all non-zero saved values to 0.0 (idempotent)"""
+        self.dirty = {}
         current_bank = self.banks[self.select_bank_index]
-        # Mark all non-zero values as dirty (to be cleared)
         for i in range(12):
             if current_bank[i] != 0.0:
                 self.dirty[i] = 0.0
