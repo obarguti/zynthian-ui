@@ -24,6 +24,7 @@
 # ******************************************************************************
 
 import tkinter
+import tkinter.font as tkfont
 import logging
 import os
 import json
@@ -42,8 +43,8 @@ NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 BLACK_KEYS_COLOR = "#2F2F2F"
 WHITE_KEYS_COLOR = "#C0C0C0"
 TUNING_RANGE = [-50, 50]
-LABEL_SIZE = getattr(zynthian_gui_config, 'font_size', 12)
 TUNING_UPDATE_DELAY = 500  # Milliseconds to wait before applying tuning to engine
+MS_TO_SECONDS = 1000.0
 
 # ------------------------------------------------------------------------------
 # Microtuning Key Widget Class
@@ -60,29 +61,41 @@ class MicrotuningKeyWidget(tkinter.Frame):
         bg_color = WHITE_KEYS_COLOR if not isBlack else BLACK_KEYS_COLOR
         text_color = BLACK_KEYS_COLOR if not isBlack else WHITE_KEYS_COLOR
 
-        # Create canvas
+        value_font_size = int(0.75 * zynthian_gui_config.font_size) if not isBlack else int(0.7 * zynthian_gui_config.font_size)
+
+        value_text_height = tkfont.Font(family=zynthian_gui_config.font_family, size=int(0.75 * zynthian_gui_config.font_size)).metrics('linespace')
+        self.key_height = px_h - value_text_height
+
+        # Create canvas with transparent background
         self.canvas = tkinter.Canvas(self, width=px_w, height=px_h, 
-                                     bg=bg_color,
+                                     bg=zynthian_gui_config.color_panel_bg,
                                      bd=0,
                                      highlightthickness=0,
                                      relief=tkinter.FLAT)
-        self.canvas.pack()
+        self.canvas.pack(fill='both')
 
-        # Draw note text
-        self.canvas.create_text(px_w // 2, px_h // 2, text=name, fill=text_color, 
-                                font=(zynthian_gui_config.font_family, LABEL_SIZE))
+        # Draw key rectangle (nested key_canvas equivalent)
+        self.key_rect = self.canvas.create_rectangle(0, 0, px_w, self.key_height, fill=bg_color, outline=bg_color)
 
-        # Draw initial marker line
-        self.marker_y = 0.5 * px_h
+        # Draw 1px black borders on left and right for white keys
+        if not isBlack:
+            self.canvas.create_line(0, 0, 0, self.key_height, fill=BLACK_KEYS_COLOR, width=1)
+            self.canvas.create_line(px_w - 1, 0, px_w - 1, self.key_height, fill=BLACK_KEYS_COLOR, width=1)
+
+        # Draw note text at top of key
+        self.note_text = self.canvas.create_text(px_w // 2, self.key_height // 2, text=name, fill=text_color, 
+                                font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size))
+
+        # Draw initial marker line in middle of key
+        self.marker_y = self.key_height // 2
         self.marker = self.canvas.create_line(0, self.marker_y, px_w, self.marker_y, fill=zynthian_gui_config.color_on, width=4, tags="marker")
+
+        # Draw value text at bottom
+        self.value_text = self.canvas.create_text(px_w // 2, px_h - value_text_height // 2, text="0", fill=zynthian_gui_config.color_tx, 
+                                font=(zynthian_gui_config.font_family, value_font_size))
 
         # Bind to configure event to update marker when canvas is resized
         self.canvas.bind("<Configure>", self.on_configure)
-
-        # Create label
-        self.label = tkinter.Label(self, text="0.00", fg=WHITE_KEYS_COLOR, bg=zynthian_gui_config.color_panel_bg, 
-                                   font=(zynthian_gui_config.font_family, LABEL_SIZE - 2))
-        self.label.pack()
 
         # Set initial value and update marker position
         self.set_value(value)
@@ -98,12 +111,11 @@ class MicrotuningKeyWidget(tkinter.Frame):
     def set_value(self, value):
         self.value = self._clamp(float(value), TUNING_RANGE[0], TUNING_RANGE[1])
         self.update_marker()
-        self.label.config(text=f"{self.value:.2f}")
+        self.canvas.itemconfig(self.value_text, text=f"{self.value:.0f}")
 
     def update_marker(self):
-        height = self.canvas.winfo_height()
         val = (TUNING_RANGE[1] - self.value) / 100  # 0 at top (+50), 1 at bottom (-50)
-        self.marker_y = val * height
+        self.marker_y = val * self.key_height
         self.canvas.coords(self.marker, 0, self.marker_y, self.canvas.winfo_width(), self.marker_y)
 
     def on_press(self, event):
@@ -118,8 +130,7 @@ class MicrotuningKeyWidget(tkinter.Frame):
 
     def on_motion(self, event):
         if self.press_event:
-            height = self.canvas.winfo_height()
-            val = self._clamp(event.y / height, 0, 1)
+            val = self._clamp(event.y / self.key_height, 0, 1)
             self.value = TUNING_RANGE[1] - (val * 100)
             
             # Magnetic snap points at 0.00 and -50.00
@@ -130,7 +141,7 @@ class MicrotuningKeyWidget(tkinter.Frame):
                 self.value = -50.0
             
             self.update_marker()
-            self.label.config(text=f"{self.value:.2f}")
+            self.canvas.itemconfig(self.value_text, text=f"{self.value:.0f}")
             if self.callback:
                 self.callback(self.value)
 
@@ -308,26 +319,30 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         self.right_frame = tkinter.Frame(self.main_frame,
                                          bg=zynthian_gui_config.color_panel_bg)
         
-        self.center_frame.grid(row=0, column=0, rowspan=4, padx=(0, 2), sticky='news')
+        self.center_frame.grid(row=0, column=0, rowspan=4, sticky='news')
         self.right_frame.grid(row=0, column=1, rowspan=4, sticky='news')
 
-        # Add bottom border (1px black)
-        bottom_border = tkinter.Frame(self.main_frame, bg=BLACK_KEYS_COLOR, height=2)
-        bottom_border.pack(side='bottom', fill='x')
+        # Add left border to right_frame
+        right_left_border = tkinter.Frame(self.right_frame, bg="black", width=2)
+        right_left_border.pack(side='left', fill='y')
 
-        # Add left border (1px black) to right_frame
-        left_border = tkinter.Frame(self.right_frame, bg=BLACK_KEYS_COLOR, width=2)
-        left_border.pack(side='left', fill='y')
+        # Add bottom border (1px black)
+        bottom_border = tkinter.Frame(self.main_frame, bg="black", height=2)
+        bottom_border.pack(side='bottom', fill='x')
 
     def create_bank_buttons(self):
         # Create 4 bank selector buttons on the right
         for i in range(4):
             btn_frame = tkinter.Frame(self.right_frame, bg=zynthian_gui_config.color_panel_bg)
-            btn_frame.pack(fill=tkinter.BOTH, expand=True, pady=1)
+            btn_frame.pack(fill=tkinter.BOTH, expand=True, pady=0)
             
             # Top border
-            top_border = tkinter.Frame(btn_frame, bg=BLACK_KEYS_COLOR, height=1)
+            top_border = tkinter.Frame(btn_frame, bg="black", height=1)
             top_border.pack(fill='x', side='top')
+            
+            # Bottom border
+            bottom_border = tkinter.Frame(btn_frame, bg="black", height=1)
+            bottom_border.pack(fill='x', side='bottom')
             
             btn = tkinter.Button(btn_frame,
                                 text=f"Bank {i + 1}",
@@ -343,62 +358,106 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             btn.pack(fill=tkinter.BOTH, expand=True, padx=0, pady=0)
             self.bank_buttons.append(btn)
     
-    def get_key_sizes(self):
-        """Helper to measure pixel sizes for keys (same for white and black)"""
-        key_width = 3
-        key_height = 8
-
-        # Measure key size (same for both white and black)
-        dummy_key = tkinter.Button(
-            self.center_frame, text="C", width=key_width, height=key_height,
-            font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size)
-        )
-        dummy_key.update_idletasks()
-        px_w = dummy_key.winfo_reqwidth()
-        px_h = dummy_key.winfo_reqheight()
-        dummy_key.destroy()
-
-        return px_w, px_h
+    def get_key_sizes(self, parent=None):
+        """Calculate key sizes based on parent frame type"""
+        if parent is None:
+            parent = self.center_frame
+        
+        # Get parent frame dimensions
+        parent.update_idletasks()
+        parent_w = parent.winfo_width()
+        parent_h = parent.winfo_height()
+        
+        # Key height: occupy entire parent height
+        key_height = parent_h
+        
+        # Key width: depends on which panel
+        if parent == self.top_frame:
+            # Top panel (black keys): divide by 12
+            key_width = parent_w // 12
+        elif parent == self.bottom_frame:
+            # Bottom panel (white keys): fill entire width by distributing pixels
+            key_width = parent_w // 7  # floor division ensures 7 keys always fit within frame width
+        else:
+            # Fallback
+            key_width = parent_w // 7
+        
+        return key_width, key_height
 
     def create_keyboard(self):
         self.center_frame.update_idletasks()
-        px_w, px_h = self.get_key_sizes()
-        padding = 10
-        center_w = self.center_frame.winfo_width()
-        available_w = center_w - 2 * padding
-        white_spacing = (available_w / 7) * 0.85  # Reduced spacing
-        # Center the keyboard by calculating offset
-        total_keyboard_width = 6 * white_spacing + px_w
-        centering_offset = (available_w - total_keyboard_width) / 2
-        start_x = padding + centering_offset
-        
+
+        # Configure center_frame for two rows (top and bottom halves)
+        self.center_frame.rowconfigure(0, weight=1)
+        self.center_frame.rowconfigure(1, weight=1)
+        self.center_frame.columnconfigure(0, weight=1)
+
+        # 5% relative padding on all sides - fully responsive to any screen size
+        pad = 0.05
+
+        # Create top frame for black keys (top half minus outer padding)
+        self.top_frame = tkinter.Frame(self.center_frame, bg=zynthian_gui_config.color_panel_bg)
+        self.top_frame.place(relx=pad, rely=pad, relwidth=1 - 2 * pad, relheight=0.5 - pad)
+
+        # Create bottom frame for white keys (bottom half minus outer padding)
+        self.bottom_frame = tkinter.Frame(self.center_frame, bg=zynthian_gui_config.color_panel_bg)
+        self.bottom_frame.place(relx=pad, rely=0.5, relwidth=1 - 2 * pad, relheight=0.5 - pad)
+
+        # Update layout to get frame dimensions
+        self.center_frame.update_idletasks()
+
+        frame_w = self.top_frame.winfo_width()
+        top_key_h = self.top_frame.winfo_height()
+        bottom_key_h = self.bottom_frame.winfo_height()
+
+        # White key width drives everything
+        ww = frame_w // 7
+        # Black key width: 67% of white key width
+        bw = round(0.67 * ww)
+
+        # Precompute white key positions using sub-pixel-accurate rounding
+        white_xs = [round(i * frame_w / 7) for i in range(7)]
+        white_ws = [round((i + 1) * frame_w / 7) - round(i * frame_w / 7) for i in range(7)]
+
+        # Chromatic index → white key slot index (for white notes only)
+        chrom_to_white = {0: 0, 2: 1, 4: 2, 5: 3, 7: 4, 9: 5, 11: 6}
+
+        # Black key chromatic index → index of the white key to its RIGHT (boundary anchor)
+        black_boundaries = {1: 1, 3: 2, 6: 4, 8: 5, 10: 6}
+
         pending_values = self.state.get_pending_values()
 
-        # Lower row: whites (7 keys)
-        white_y = self.center_frame.winfo_height() - px_h - 50
-        white_notes = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
-        for i, note in enumerate(white_notes):
-            idx = NOTES.index(note)
-            x = start_x + i * white_spacing
-            widget = MicrotuningKeyWidget(self.center_frame, note, px_w, px_h, 
-                                          value=pending_values[idx], 
+        # Bottom frame: white keys at sub-pixel-accurate positions
+        white_notes = [(idx, note) for idx, note in enumerate(NOTES) if len(note) == 1]
+        for white_idx, (idx, note) in enumerate(white_notes):
+            x = white_xs[white_idx]
+            w = white_ws[white_idx]
+            widget = MicrotuningKeyWidget(self.bottom_frame, note, w, bottom_key_h,
+                                          value=pending_values[idx],
                                           callback=lambda val, idx=idx: self.on_key_value_change(idx, val))
             widget.note_idx = idx
-            widget.place(x=x, y=white_y)
+            widget.place(x=x, y=0, width=w, height=bottom_key_h)
             self.key_widgets.append(widget)
 
-        # Upper row: blacks (5 keys), aligned with whites
-        black_y = white_y - px_h - 40
-        black_notes = ['C#', 'D#', 'F#', 'G#', 'A#']
-        black_positions = [0.5, 1.5, 3.5, 4.5, 5.5]  # Between whites
-        for j, (note, pos) in enumerate(zip(black_notes, black_positions)):
-            idx = NOTES.index(note)
-            x = start_x + pos * white_spacing
-            widget = MicrotuningKeyWidget(self.center_frame, note, px_w, px_h, 
-                                          value=pending_values[idx], 
-                                          callback=lambda val, idx=idx: self.on_key_value_change(idx, val))
-            widget.note_idx = idx
-            widget.place(x=x, y=black_y)
+        # Top frame: white fillers first (placed before black keys so black keys render on top)
+        for chrom_idx, white_idx in chrom_to_white.items():
+            x = white_xs[white_idx]
+            w = white_ws[white_idx]
+            filler = tkinter.Canvas(self.top_frame, bg=WHITE_KEYS_COLOR, bd=0, highlightthickness=0, relief=tkinter.FLAT)
+            filler.place(x=x, y=0, width=w, height=top_key_h)
+            filler.create_line(0, 0, 0, top_key_h, fill=BLACK_KEYS_COLOR, width=1)
+            filler.create_line(w - 1, 0, w - 1, top_key_h, fill=BLACK_KEYS_COLOR, width=1)
+
+        # Top frame: black key widgets on top, centered at white key boundaries
+        for chrom_idx, right_white_idx in black_boundaries.items():
+            note = NOTES[chrom_idx]
+            boundary_x = white_xs[right_white_idx]
+            x = boundary_x - bw // 2
+            widget = MicrotuningKeyWidget(self.top_frame, note, bw, top_key_h,
+                                          value=pending_values[chrom_idx],
+                                          callback=lambda val, idx=chrom_idx: self.on_key_value_change(idx, val))
+            widget.note_idx = chrom_idx
+            widget.place(x=x, y=0, width=bw, height=top_key_h)
             self.key_widgets.append(widget)
 
     def on_key_value_change(self, idx, value):
@@ -411,7 +470,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
             self.update_timer.cancel()
         
         # Schedule a new tuning update after debounce delay
-        self.update_timer = Timer(TUNING_UPDATE_DELAY / 1000.0, self.apply_tuning_to_engine)
+        self.update_timer = Timer(TUNING_UPDATE_DELAY / MS_TO_SECONDS, self.apply_tuning_to_engine)
         self.update_timer.start()
 
     def refresh_fluidsynth_engine(self):
