@@ -51,58 +51,58 @@ MS_TO_SECONDS = 1000.0
 # ------------------------------------------------------------------------------
 class MicrotuningKeyWidget(tkinter.Frame):
     def __init__(self, parent, name, px_w, px_h, value=0, callback=None, **kwargs):
-
-        super().__init__(parent, bg=zynthian_gui_config.color_panel_bg, **kwargs)
+        cfg = zynthian_gui_config
+        super().__init__(parent, bg=cfg.color_panel_bg, **kwargs)
 
         self.name = name
         self.callback = callback
 
-        isBlack = len(name) > 1
-        bg_color = WHITE_KEYS_COLOR if not isBlack else BLACK_KEYS_COLOR
-        text_color = BLACK_KEYS_COLOR if not isBlack else WHITE_KEYS_COLOR
+        is_black = len(name) > 1
+        bg_color = WHITE_KEYS_COLOR if not is_black else BLACK_KEYS_COLOR
+        text_color = BLACK_KEYS_COLOR if not is_black else WHITE_KEYS_COLOR
+        font_size = cfg.font_size
+        font_family = cfg.font_family
 
-        value_font_size = int(0.75 * zynthian_gui_config.font_size) if not isBlack else int(0.7 * zynthian_gui_config.font_size)
+        def linespace(size):
+            return tkfont.Font(family=font_family, size=size).metrics('linespace')
 
-        value_text_height = tkfont.Font(family=zynthian_gui_config.font_family, size=int(0.75 * zynthian_gui_config.font_size)).metrics('linespace')
+        value_font_size = int(0.75 * font_size) if not is_black else int(0.7 * font_size)
+        value_text_height = linespace(int(0.75 * font_size))
+        self.marker_half_h = max(1, linespace(font_size) // 8)
         self.key_height = px_h - value_text_height
 
-        # Create canvas with transparent background
-        self.canvas = tkinter.Canvas(self, width=px_w, height=px_h, 
-                                     bg=zynthian_gui_config.color_panel_bg,
-                                     bd=0,
-                                     highlightthickness=0,
-                                     relief=tkinter.FLAT)
+        # Create canvas
+        self.canvas = tkinter.Canvas(self, width=px_w, height=px_h,
+                                     bg=cfg.color_panel_bg, bd=0,
+                                     highlightthickness=0, relief=tkinter.FLAT)
         self.canvas.pack(fill='both')
 
-        # Draw key rectangle (nested key_canvas equivalent)
+        center_x = px_w // 2
+        mid_y = self.key_height // 2
+
         self.key_rect = self.canvas.create_rectangle(0, 0, px_w, self.key_height, fill=bg_color, outline=bg_color)
 
-        # Draw 1px black borders on left and right for white keys
-        if not isBlack:
+        # 1px side and bottom borders for white keys
+        if not is_black:
             self.canvas.create_line(0, 0, 0, self.key_height, fill=BLACK_KEYS_COLOR, width=1)
             self.canvas.create_line(px_w - 1, 0, px_w - 1, self.key_height, fill=BLACK_KEYS_COLOR, width=1)
 
-        # Draw note text at top of key
-        self.note_text = self.canvas.create_text(px_w // 2, self.key_height // 2, text=name, fill=text_color, 
-                                font=(zynthian_gui_config.font_family, zynthian_gui_config.font_size))
+        # Note name, marker line, neutral rect, value text
+        self.note_text   = self.canvas.create_text(center_x, mid_y, text=name, fill=text_color, font=(font_family, font_size))
+        self.marker_y    = mid_y
+        self.marker      = self.canvas.create_line(0, mid_y, px_w, mid_y, fill=cfg.color_on, width=self.marker_half_h * 2, stipple="gray50", tags="marker")
+        self.neutral_rect = self.canvas.create_rectangle(
+            0, mid_y - self.marker_half_h, px_w, mid_y + self.marker_half_h,
+            fill=cfg.color_on, outline="", stipple="gray50", tags="neutral_rect"
+        )
+        self.value_text  = self.canvas.create_text(center_x, px_h - value_text_height // 2, text="0.0",
+                                fill=cfg.color_tx, font=(font_family, value_font_size))
 
-        # Draw initial marker line in middle of key
-        self.marker_y = self.key_height // 2
-        self.marker = self.canvas.create_line(0, self.marker_y, px_w, self.marker_y, fill=zynthian_gui_config.color_on, width=4, tags="marker")
-
-        # Draw value text at bottom
-        self.value_text = self.canvas.create_text(px_w // 2, px_h - value_text_height // 2, text="0", fill=zynthian_gui_config.color_tx, 
-                                font=(zynthian_gui_config.font_family, value_font_size))
-
-        # Bind to configure event to update marker when canvas is resized
         self.canvas.bind("<Configure>", self.on_configure)
-
-        # Set initial value and update marker position
         self.set_value(value)
         self.canvas.bind("<ButtonPress-1>", self.on_press)
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
         self.canvas.bind("<B1-Motion>", self.on_motion)
-
         self.press_event = None
 
     def get_value(self):
@@ -111,12 +111,21 @@ class MicrotuningKeyWidget(tkinter.Frame):
     def set_value(self, value):
         self.value = self._clamp(float(value), TUNING_RANGE[0], TUNING_RANGE[1])
         self.update_marker()
-        self.canvas.itemconfig(self.value_text, text=f"{self.value:.0f}")
+        self.canvas.itemconfig(self.value_text, text=f"{self.value:.1f}")
 
     def update_marker(self):
         val = (TUNING_RANGE[1] - self.value) / 100  # 0 at top (+50), 1 at bottom (-50)
-        self.marker_y = val * self.key_height
-        self.canvas.coords(self.marker, 0, self.marker_y, self.canvas.winfo_width(), self.marker_y)
+        self.marker_y = self._clamp(val * self.key_height, self.marker_half_h, self.key_height - self.marker_half_h + 1)
+        w = self.canvas.winfo_width()
+        self.canvas.coords(self.marker, 0, self.marker_y, w, self.marker_y)
+        neutral_y = 0.5 * self.key_height
+        self.canvas.coords(self.neutral_rect, 0, neutral_y - self.marker_half_h, w, neutral_y + self.marker_half_h)
+        if self.value == 0.0:
+            self.canvas.itemconfig(self.marker, state=tkinter.HIDDEN)
+            self.canvas.itemconfig(self.neutral_rect, state=tkinter.NORMAL)
+        else:
+            self.canvas.itemconfig(self.marker, state=tkinter.NORMAL)
+            self.canvas.itemconfig(self.neutral_rect, state=tkinter.HIDDEN)
 
     def on_press(self, event):
         self.press_event = event
@@ -141,7 +150,7 @@ class MicrotuningKeyWidget(tkinter.Frame):
                 self.value = -50.0
             
             self.update_marker()
-            self.canvas.itemconfig(self.value_text, text=f"{self.value:.0f}")
+            self.canvas.itemconfig(self.value_text, text=f"{self.value:.1f}")
             if self.callback:
                 self.callback(self.value)
 
