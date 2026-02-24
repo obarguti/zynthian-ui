@@ -362,8 +362,8 @@ class zynthian_gui_microtuning(zynthian_gui_base):
                                 activeforeground=zynthian_gui_config.color_tx,
                                 bd=0,
                                 highlightthickness=0,
-                                relief=tkinter.FLAT,
-                                command=lambda idx=i: self.select_bank(idx))
+                                relief=tkinter.FLAT)
+            btn.bind('<ButtonRelease-1>', lambda event, idx=i: self.select_bank(idx))
             btn.pack(fill=tkinter.BOTH, expand=True, padx=0, pady=0)
             self.bank_buttons.append(btn)
     
