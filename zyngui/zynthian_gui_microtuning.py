@@ -40,8 +40,8 @@ from zyncoder.zyncore import lib_zyncore
 # Constants
 # ------------------------------------------------------------------------------
 NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-BLACK_KEYS_COLOR = "#2F2F2F"
-WHITE_KEYS_COLOR = "#C0C0C0"
+BLACK_KEYS_COLOR = "#000000"
+WHITE_KEYS_COLOR = "#FFFFFF"
 TUNING_RANGE = [-50, 50]
 TUNING_UPDATE_DELAY = 500  # Milliseconds to wait before applying tuning to engine
 MS_TO_SECONDS = 1000.0
