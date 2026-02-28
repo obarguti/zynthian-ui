@@ -45,6 +45,9 @@ WHITE_KEYS_COLOR = "#FFFFFF"
 TUNING_RANGE = [-50, 50]
 TUNING_UPDATE_DELAY = 500  # Milliseconds to wait before applying tuning to engine
 MS_TO_SECONDS = 1000.0
+TUNING_NAME = "Microtuning"
+TUNING_BANK = 0
+TUNING_PROGRAM = 0
 
 # ------------------------------------------------------------------------------
 # Microtuning Key Widget Class
@@ -513,7 +516,7 @@ class zynthian_gui_microtuning(zynthian_gui_base):
         
         try:
             # Create tuning (bank 0, program 0) - correct FluidSynth syntax
-            engine.proc_cmd("tuning Microtuning 0 0")
+            engine.proc_cmd(f"tuning {TUNING_NAME} {TUNING_BANK} {TUNING_PROGRAM}")
             
             # Apply tuning to all 12 notes across all octaves
             # FluidSynth uses MIDI note numbers: 0-127
@@ -525,11 +528,11 @@ class zynthian_gui_microtuning(zynthian_gui_base):
                         # FluidSynth tune command: tune <bank> <prog> <key> <pitch>
                         # Pitch = MIDI note * 100 + cents_offset
                         pitch = midi_note * 100.0 + cents_offset
-                        engine.proc_cmd(f"tune 0 0 {midi_note} {pitch}")
+                        engine.proc_cmd(f"tune {TUNING_BANK} {TUNING_PROGRAM} {midi_note} {pitch}")
             
             # Apply tuning to all MIDI channels (0-15) - correct FluidSynth syntax
             for chan in range(16):
-                engine.proc_cmd(f"settuning {chan} 0 0")
+                engine.proc_cmd(f"settuning {chan} {TUNING_BANK} {TUNING_PROGRAM}")
             
         except Exception as e:
             logging.error(f"Error applying tuning to FluidSynth: {e}")
